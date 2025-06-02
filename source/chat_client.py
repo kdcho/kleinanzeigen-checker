@@ -1,7 +1,7 @@
 from typing import List
 
 from telegram.ext import ContextTypes, Job
-from kleinanzeigenbot import KleinanzeigenBot, KleinanzeigenItem
+from kleinanzeigenbot import KleinanzeigenBot
 
 
 class ChatClient:
@@ -25,14 +25,14 @@ class ChatClient:
         if len(self.registered_bots) <= 0:
             await context.bot.send_message(
                 chat_id=self.id,
-                text=f"There are not bots to sart yet. Try adding some with /add_bot",
+                text="There are not bots to sart yet. Try adding some with /add_bot",
             )
             return
 
         if context.job_queue is None:
             await context.bot.send_message(
                 chat_id=self.id,
-                text=f"Could not start due to internal error 501",
+                text="Could not start due to internal error 501",
             )
             print("context has no job_queue")
             return
@@ -40,12 +40,14 @@ class ChatClient:
         if self.fetch_job_running():
             await context.bot.send_message(
                 chat_id=self.id,
-                text=f"Fetch job is already running.",
+                text="Fetch job is already running.",
             )
             return
 
         # Create and schedule the job
-        self.fetch_job = context.job_queue.run_repeating(self.fetch_articles, interval=120, first=10)
+        self.fetch_job = context.job_queue.run_repeating(
+            self.fetch_articles, interval=120, first=10
+        )
         await context.bot.send_message(
             chat_id=self.id,
             text=f"Fetch job for {len(self.registered_bots)} bots is now running!",
@@ -69,10 +71,10 @@ class ChatClient:
             for a in articles:
                 if not a.check_filters(self.filters):
                     continue
-                message = (
-                    f"<b>{a.title}</b>\n{a.price} -- <i>{a.location}</i>\nhttps://www.kleinanzeigen.de{a.url}\n<i>search: {bot.name}</i>"
+                message = f"<b>{a.title}</b>\n{a.price} -- <i>{a.location}</i>\nhttps://www.kleinanzeigen.de{a.url}\n<i>search: {bot.name}</i>"
+                await context.bot.send_message(
+                    chat_id=self.id, text=message, parse_mode="HTML"
                 )
-                await context.bot.send_message(chat_id=self.id, text=message, parse_mode="HTML")
 
     def add_bot(self, bot: KleinanzeigenBot):
         self.registered_bots.append(bot)
@@ -80,7 +82,9 @@ class ChatClient:
     def remove_bot(self, link: str) -> bool:
         before = len(self.registered_bots)
 
-        self.registered_bots = list(filter(lambda x: x.name != link, self.registered_bots))
+        self.registered_bots = list(
+            filter(lambda x: x.name != link, self.registered_bots)
+        )
 
         after = len(self.registered_bots)
 

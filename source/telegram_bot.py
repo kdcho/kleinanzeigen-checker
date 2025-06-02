@@ -6,13 +6,24 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 from kleinanzeigenbot import KleinanzeigenBot
 from chat_client import ChatClient
-
+from persistence import (
+    init_db,
+    add_bot as db_add_bot,
+    remove_bot as db_remove_bot,
+    clear_bots as db_clear_bots,
+    load_bots as db_load_bots,
+    add_filter as db_add_filter,
+    clear_filters as db_clear_filters,
+    load_filters as db_load_filters,
+)
 
 registered_bots_dict: Dict[int, ChatClient] = {}
 # filters = []
 # fetch_job_started = False
 
-logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
 # set higher logging level for httpx to avoid all GET and POST requests being logged
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -51,7 +62,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     :param context: [TODO:description]
     """
 
-    message = f"""Welcome. Available commands are:
+    message = """Welcome. Available commands are:
 
     /start -- Show this message
     /start_bots  -- start fetching with registered bots
@@ -66,7 +77,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await bot_respond(update, context, message)
 
 
-async def get_chat_client(update: Update, context: ContextTypes.DEFAULT_TYPE) -> ChatClient | None:
+async def get_chat_client(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> ChatClient | None:
     """
     Check if the current chat id already has a registered chatClient.
 
@@ -79,7 +92,7 @@ async def get_chat_client(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return None
     chat_id = update.effective_chat.id
 
-    if not (chat_id in registered_bots_dict.keys()):
+    if chat_id not in registered_bots_dict.keys():
         await register(update, context)
 
     return registered_bots_dict[chat_id]
@@ -93,7 +106,7 @@ async def start_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
     :param context: the current context.
     """
     chatClient = await get_chat_client(update, context)
-    if chatClient == None:
+    if chatClient is None:
         return
 
     await chatClient.start_fetch_job(context)
@@ -109,7 +122,7 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     :param context: the current context
     """
     chatClient = await get_chat_client(update, context)
-    if chatClient == None:
+    if chatClient is None:
         return
 
     if not chatClient.fetch_job_running():
@@ -152,7 +165,7 @@ async def add_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     :param context: the current context
     """
     chatClient = await get_chat_client(update, context)
-    if chatClient == None:
+    if chatClient is None:
         return
 
     # add a new bot to the registered bots
@@ -177,22 +190,28 @@ async def add_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     chatClient.add_bot(bot)
+    db_add_bot(bot.name, bot.url)
 
-    await bot_respond(update, context, f"added new bot: {bot.name}, with {bot.num_items()} items registered.")
+    await bot_respond(
+        update,
+        context,
+        f"added new bot: {bot.name}, with {bot.num_items()} items registered.",
+    )
 
 
 async def add_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chatClient = await get_chat_client(update, context)
-    if chatClient == None:
+    if chatClient is None:
         return
 
     args = context.args
 
-    if args == None:
+    if args is None:
         return
 
     for filter in args:
         chatClient.add_filter(filter)
+        db_add_filter(filter)
 
     filterList = reduce(lambda a, b: a + "\n- " + b, chatClient.filters, "\n- ")
     await bot_respond(update, context, f"added new filter(s): {filterList}")
@@ -200,7 +219,7 @@ async def add_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_filters(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chatClient = await get_chat_client(update, context)
-    if chatClient == None:
+    if chatClient is None:
         return
 
     if len(chatClient.filters) <= 0:
@@ -219,10 +238,11 @@ async def clear_filters(update: Update, context: ContextTypes.DEFAULT_TYPE):
     :param context: the current context
     """
     chatClient = await get_chat_client(update, context)
-    if chatClient == None:
+    if chatClient is None:
         return
 
     chatClient.filters.clear()
+    db_clear_filters()
 
     await bot_respond(update, context, "cleared all filters")
 
@@ -235,7 +255,7 @@ async def clear_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
     :param context: the current context
     """
     chatClient = await get_chat_client(update, context)
-    if chatClient == None:
+    if chatClient is None:
         return
 
     # stop running fetch jobs.
@@ -246,19 +266,24 @@ async def clear_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for bot in chatClient.registered_bots:
         info += f"\n- {bot.name} -- {bot.url}"
     chatClient.registered_bots.clear()
+    db_clear_bots()
 
     await bot_respond(update, context, info)
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chatClient = await get_chat_client(update, context)
-    if chatClient == None:
+    if chatClient is None:
         return
 
-    info = "status: " + ('<b style="color:#00FF00">running</b>' if chatClient.fetch_job_running() else '<b style="color:#FF0000">idle</b>')
+    info = "status: " + (
+        '<b style="color:#00FF00">running</b>'
+        if chatClient.fetch_job_running()
+        else '<b style="color:#FF0000">idle</b>'
+    )
     info += "\nregistered links:"
     for bot in chatClient.registered_bots:
-        info += f"\n{bot.name}: {bot.num_items()} items registered"
+        info += f"\n{bot.name}: {bot.num_items()} items registered | {bot.url}"
 
     await context.bot.send_message(chat_id=chatClient.id, text=info, parse_mode="HTML")
 
@@ -278,12 +303,18 @@ async def remove_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     chatClient = await get_chat_client(update, context)
-    if chatClient == None:
+    if chatClient is None:
         return
 
     if not chatClient.remove_bot(args[0]):
-        await bot_respond(update, context, "could not remove bot from active list. are you sure it exists?")
+        await bot_respond(
+            update,
+            context,
+            "could not remove bot from active list. are you sure it exists?",
+        )
         return
+
+    db_remove_bot(args[0])
 
     message = f"successfully removed {args[0]}."
 
@@ -295,6 +326,8 @@ async def remove_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 if __name__ == "__main__":
+    # Initialize DB and load state
+    init_db()
 
     # Get the Telegram API Token from token.txt
     try:
@@ -335,6 +368,17 @@ if __name__ == "__main__":
     application.add_handler(add_filter_handler)
     application.add_handler(show_filters_handler)
     application.add_handler(clear_filter_handler)
+
+    # Load bots from DB and add to the first registered ChatClient (if any)
+    bots = db_load_bots()
+    filters = db_load_filters()
+    if bots or filters:
+        # If there is at least one chat registered, populate it
+        if registered_bots_dict:
+            chatClient = next(iter(registered_bots_dict.values()))
+            for name, url in bots:
+                chatClient.add_bot(KleinanzeigenBot(url, name))
+            chatClient.filters = filters
 
     # drop_pending_updates discards all updates before startup
     application.run_polling(drop_pending_updates=True)
